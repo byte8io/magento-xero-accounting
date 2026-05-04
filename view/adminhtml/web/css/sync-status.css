@@ -1,0 +1,27 @@
+/*
+ * "Xero Status" chip styling — same palette as Sage's chip CSS so
+ * the two providers stay visually identical when both are bound.
+ *
+ * Note: when both module-sage-accounting AND module-xero-accounting
+ * load on the same admin install, both ship a `byte8-sync-chip` rule
+ * set. They're identical, so order doesn't matter — last-wins is a
+ * no-op. Future enhancement: hoist the CSS into module-client so it
+ * lives once.
+ */
+.byte8-sync-chip {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 16px;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    cursor: default;
+}
+
+.byte8-sync-chip--synced  { background: #e3f5e1; color: #1f7a1f; }
+.byte8-sync-chip--pending { background: #ececec; color: #555;    }
+.byte8-sync-chip--skipped { background: #fff3cd; color: #8a6d00; }
+.byte8-sync-chip--failed  { background: #fce4e4; color: #b3261e; }
+.byte8-sync-chip--none    { background: transparent; color: #999; font-weight: 400; }

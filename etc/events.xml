@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © Byte8 Ltd. All rights reserved.
+ * See LICENSE.txt for license details.
+ */
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework:Event/etc/events.xsd">
+    <!--
+        Same observer split as Byte8_SageAccounting (see that module's
+        events.xml for the rationale): invoice.created fires on the
+        first save edge regardless of paid status; invoice.paid fires
+        on the OPEN → PAID transition. Declaration order matters when
+        both fire on the same save (capture-online flow): created MUST
+        reach the ledger queue before paid so the Xero invoice
+        exists by the time the payment-attach job runs.
+    -->
+    <event name="sales_order_invoice_save_after">
+        <observer name="byte8_xero_invoice_created"
+                  instance="Byte8\XeroAccounting\Observer\InvoiceCreatedObserver"/>
+        <observer name="byte8_xero_invoice_paid"
+                  instance="Byte8\XeroAccounting\Observer\InvoicePaidObserver"/>
+    </event>
+    <event name="customer_save_after">
+        <observer name="byte8_xero_customer_upserted"
+                  instance="Byte8\XeroAccounting\Observer\CustomerUpsertedObserver"/>
+    </event>
+    <event name="sales_order_creditmemo_save_after">
+        <observer name="byte8_xero_creditmemo_created"
+                  instance="Byte8\XeroAccounting\Observer\CreditMemoCreatedObserver"/>
+    </event>
+    <!--
+        No product / stock observers in v1 — XERO_PRODUCT_CONCEPT
+        intentionally scopes catalog + stock sync out of the Xero
+        tier. The buyer profile (sole traders, freelancers, micro-
+        businesses on NatWest-bundled Xero) doesn't run inventory
+        at the volume that justifies it. Add observers when a paying
+        merchant surfaces the need.
+    -->
+</config>

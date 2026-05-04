@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © Byte8 Ltd. All rights reserved.
+ * See LICENSE.txt for license details.
+ */
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Backend:etc/menu.xsd">
+    <menu>
+        <add id="Byte8_XeroAccounting::sync"
+             title="Xero Sync"
+             translate="title"
+             module="Byte8_XeroAccounting"
+             sortOrder="30"
+             parent="Byte8_Core::byte8"
+             action="byte8xeroaccounting/sync/index"
+             resource="Byte8_XeroAccounting::sync"/>
+        <add id="Byte8_XeroAccounting::config_xero_accounting"
+             title="Xero"
+             translate="title"
+             module="Byte8_XeroAccounting"
+             sortOrder="30"
+             parent="Byte8_Core::config"
+             action="adminhtml/system_config/edit/section/byte8_xero_accounting/"
+             resource="Byte8_XeroAccounting::config"/>
+    </menu>
+</config>

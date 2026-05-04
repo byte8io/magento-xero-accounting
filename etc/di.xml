@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © Byte8 Ltd. All rights reserved.
+ * See LICENSE.txt for license details.
+ */
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
+    <preference for="Byte8\XeroAccounting\Api\XeroConfigInterface"
+                type="Byte8\XeroAccounting\Model\XeroConfig"/>
+    <preference for="Byte8\XeroAccounting\Api\SetupPairInterface"
+                type="Byte8\XeroAccounting\Model\Setup\Pair"/>
+
+    <!--
+        PR7-equivalent for Xero: LEFT JOIN byte8_entity_sync_state
+        onto the Invoices + Credit Memos grids so the "Xero Status"
+        column has values to render.
+
+        Coexistence with Sage: when both module-sage-accounting AND
+        module-xero-accounting are installed on the same Magento
+        instance, both attempt to swap in their own grid-collection
+        implementation for the same Magento type. Magento DI honours
+        whichever module's etc/di.xml was last loaded — module sequence
+        matters. The losing module's grid-collection class doesn't run,
+        so its provider's chip column shows "—". This is acceptable for
+        v1 because most merchants use a single provider; the
+        long-term fix is hoisting the JOIN logic into module-client so
+        every registered provider gets its slice.
+
+        Same subclass-vs-plugin rationale applies as in Sage's
+        analogous di.xml — see the comment block in
+        module-sage-accounting/etc/di.xml for the full reasoning.
+    -->
+    <virtualType name="Magento\Sales\Model\ResourceModel\Order\Invoice\Grid\Collection"
+                 type="Byte8\XeroAccounting\Model\ResourceModel\Sales\InvoiceGridCollection">
+        <arguments>
+            <argument name="mainTable" xsi:type="string">sales_invoice_grid</argument>
+            <argument name="resourceModel" xsi:type="string">Magento\Sales\Model\ResourceModel\Order\Invoice</argument>
+        </arguments>
+    </virtualType>
+
+    <type name="Magento\Framework\View\Element\UiComponent\DataProvider\CollectionFactory">
+        <arguments>
+            <argument name="collections" xsi:type="array">
+                <item name="sales_order_creditmemo_grid_data_source"
+                      xsi:type="string">Byte8\XeroAccounting\Model\ResourceModel\Sales\CreditmemoGridCollection</item>
+            </argument>
+        </arguments>
+    </type>
+</config>

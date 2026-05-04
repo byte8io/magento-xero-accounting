@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © Byte8 Ltd. All rights reserved.
+ * See LICENSE.txt for license details.
+ */
+-->
+<listing xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Ui:etc/ui_configuration.xsd">
+    <columns name="sales_order_creditmemo_columns">
+        <column name="byte8_sync_status_xero"
+                class="Byte8\XeroAccounting\Ui\Component\Listing\Column\SyncStatus"
+                component="Magento_Ui/js/grid/columns/column"
+                sortOrder="136">
+            <settings>
+                <bodyTmpl>ui/grid/cells/html</bodyTmpl>
+                <filter>select</filter>
+                <options class="Byte8\XeroAccounting\Ui\Component\Listing\Column\SyncStatus\Options"/>
+                <dataType>select</dataType>
+                <label translate="true">Xero Status</label>
+            </settings>
+        </column>
+    </columns>
+</listing>
