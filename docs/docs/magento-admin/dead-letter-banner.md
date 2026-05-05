@@ -33,7 +33,7 @@ The 24h silent-drop behaviour from earlier versions is gone — nothing is ever 
 bin/magento byte8:client:outbox:inspect
 ```
 
-Shows entity_id, event_name, idempotency_key, last_status_code, last_attempt_at, the `provider` column (so you can see whether each row is Sage or Xero), and the first 200 chars of `last_error`. Most operators run this from a support session.
+Shows entity_id, event_name, idempotency_key, last_status_code, last_attempt_at, the `provider` column (so you can see which connector each row belongs to — Sage / FreeAgent / Xero), and the first 200 chars of `last_error`. Most operators run this from a support session.
 
 Filter to Xero only:
 
@@ -51,10 +51,11 @@ Flips the row back to `pending`, clears `next_attempt_at`, lets the cron pick it
 
 Common fixes before re-queue:
 
-- **Validation 4xx** — the binding's sync policy referenced a stale Xero income category / bank account URL. Refresh reference cache + correct the policy on the dashboard.
-- **`payment_terms_in_days is not a number`** — quirk #1 surfaces only on chassis versions before the workaround landed; if you see this, you're on an old chassis. Email `helo@byte8.io`.
+- **Validation 4xx** — the binding's sync policy referenced a stale Xero account code / TaxType / bank account UUID. Refresh reference cache + correct the policy on the dashboard.
+- **`Organisation is not subscribed to currency`** — XERO_API_QUIRKS §5: enable the relevant currency in your Xero org settings (Settings → Currencies). Standard plan caps at 2 active currencies.
+- **`BANKACCOUNT_NOT_VALID_FOR_PAYMENT`** — XERO_API_QUIRKS §8: the policy's bank account is `Type=REVENUE` (or other non-BANK). Re-pick a `Type=BANK` account on the settings page.
+- **`entity_xref_reverse_collision`** — XERO_API_QUIRKS §6 / §7: leftover per-currency contact xref colliding with the unified Contact. Run the SQL recipe in the quirks doc to reconcile.
 - **Auth 4xx** — the per-tenant `api_key` drifted (re-pair without storing the new one). Fix: disconnect + re-pair the binding (see [Connect → Disconnect](/docs/connect/disconnect)).
-- **Provider 422** — Xero rejected the payload for a reason in the catalogue (see [Troubleshooting](/docs/troubleshooting)). Fix the cause, re-queue.
 
 ### Cleanup old succeeded rows
 

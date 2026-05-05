@@ -1,64 +1,57 @@
 ---
 sidebar_position: 2
 title: Default mappings
-description: Default income category URL, default bank account, and default payment terms days. The fallback values used when a Magento line / invoice doesn't carry enough information to route itself.
+description: Default revenue account, default tax type, default bank account. The fallback values used when a Magento line / invoice doesn't carry enough information to route itself.
 ---
 
 # Default mappings
 
-`ledger.byte8.io/dashboard/bindings/{id}/settings` → **Xero Defaults** card.
+`ledger.byte8.io/dashboard/bindings/{id}/settings` → **Default mappings** + **Xero defaults** cards.
 
-Xero requires every invoice line to carry an income category, and every POST to carry a `payment_terms_in_days` value (Xero quirk #1 — the field is required even on net-cash invoices). Defaults fill the gap when Magento doesn't carry that information directly.
+Every Xero invoice line needs a revenue account (`LineItem.AccountCode`) and a tax type (`LineItem.TaxType`). Every payment needs a bank account (`Payment.Account.AccountID`). Defaults fill the gap when the Magento canonical doesn't carry that information directly.
 
-All dropdowns are **populated from the chassis's reference cache** — the live Xero category + bank-account list for your binding. Type-aheads work; typing a partial name filters the list.
+All dropdowns are **populated from the chassis's reference cache** — the live Xero TaxRates, Accounts list (filtered by `Type`) for your binding. Type-aheads work; typing a partial name filters the list.
 
-## `default_xero_income_category_url`
+## `default_xero_revenue_account_code`
 
-**Bucket:** `categories?nested_category_type=income` (Xero `/v2/categories?view=income`).
+**Reference bucket:** Xero `/Accounts` filtered to `Type ∈ {REVENUE, SALES, OTHERINCOME, DIRECTCOSTS, EXPENSE, OVERHEADS}`.
 
-The income category applied to invoice / credit-memo lines that don't carry their own routing. Set to the Xero income category where most of your Magento sales should book.
+The revenue account applied to every invoice line that doesn't carry a per-line override. Set to the Xero account where most of your Magento sales should book (UK CoA default `200 Sales`).
 
-Typical UK choices (from a fresh Xero account):
+Stored as the Xero `Code` (e.g. `"200"`), NOT the AccountID UUID — Xero invoice lines reference accounts by their human-readable code. The dropdown shows each account as `<Code> <Name>` (e.g. `"200 Sales"`).
 
-- `https://api.xero.com/v2/categories/001` — Sales
-- `https://api.xero.com/v2/categories/002` — Other Income
-- `https://api.xero.com/v2/categories/003` — Discounts Received
+The validator rejects values not in the cached account-code set with a red-underline `defaultXeroRevenueAccountCode` field error before save. Typos surface form-time, not at sync-time as a 400 dead-letter.
 
-The dropdown shows each category by its Xero `description` (the human-readable label) and stores the full `url` (Xero's stable identifier) in the policy. Don't confuse with `nominal_code` — categories are URL-keyed in Xero's API, not numerically.
+If unset and a line carries no specific routing, the worker omits `AccountCode` from the line — Xero applies the organisation's default. Setting this explicitly is recommended so reconciliation is deterministic.
 
-The validator rejects values not in the cached `xeroIncomeCategories` list with a red-underline `defaultXeroIncomeCategoryUrl` field error before save. Typos surface form-time, not at sync-time as a 422 dead-letter.
+## `default_xero_tax_type`
 
-If unset and a line carries no specific routing, the worker falls back to the first income category in the cache (alphabetical) and surfaces a WARN-level log line. Setting this explicitly is recommended.
+**Reference bucket:** Xero `/TaxRates`.
 
-## `default_xero_payment_terms_days`
+The fallback `LineItem.TaxType` for invoice lines whose Magento tax rate doesn't match anything in the per-line tax-routing map (not in v1 Xero scope; see Commercial knobs for the per-rate routing path on Sage). UK default `OUTPUT2` (20% sales tax); other regions vary.
 
-**Default:** `30` (always sent — Xero quirk #1).
+Stored as the Xero `TaxType` machine code (e.g. `"OUTPUT2"`, `"NONE"`, `"INPUT"`), not the human label.
 
-Number of days from invoice date until due. Xero's API requires this on **every** POST to `/v2/invoices` — even if the invoice is paid immediately, even if it's a £0 line. The chassis always sends a value, defaulting to `30` if unset on the binding.
-
-Common values:
-- `0` — net cash (B2C — money's already in the till)
-- `7`, `14`, `30` — standard B2B AR terms
-- `60`, `90` — extended terms for large B2B accounts
-
-This value is *also* what Xero uses to compute the `due_on` date shown on the PDF invoice, so set it to whatever your accountant uses on manually-created invoices for consistency.
-
-If you want per-customer terms (some B2B accounts on 30, others on 60), either set the binding-level default to your most common value and edit the Xero invoice manually for the outliers, or — for v1.1+ — wait for the planned per-customer terms map. Email `helo@byte8.io` if this is blocking you.
+If unset, lines fall back to `NONE` (no tax). Most merchants set this to their primary VAT code so single-rate invoices don't have to set it per-line.
 
 ## `default_bank_account_id`
 
-**Bucket:** `bank_accounts` (Xero `/v2/bank_accounts`).
+**Reference bucket:** Xero `/Accounts` filtered to `Type=BANK`.
 
-The default Xero bank account used for `bank_transaction_explanations` when `invoice.paid` fires for a payment method *not* mapped in the [Payment-method map](/docs/settings/payment-methods).
+The default Xero bank account used for `POST /Payments` when `invoice.paid` fires for a payment method *not* mapped in the [Payment-method map](/docs/settings/payment-methods).
+
+Stored as the Xero `AccountID` UUID (Xero's `/Payments` write requires the UUID, not the code).
 
 Optional. When unset:
 
 - Payment methods explicitly mapped → payment routed to the mapped bank account.
-- Payment methods unmapped + no default → invoice stays Open in Xero; accountant reconciles manually when the cheque / bank transfer lands. **This is the documented B2B / net-terms behaviour** and on-purpose for offline payment methods (`checkmo`, `banktransfer`, `purchaseorder`).
+- Payment methods unmapped + no default → invoice stays AUTHORISED in Xero; accountant reconciles manually when the cheque / bank transfer lands. **This is the documented B2B / net-terms behaviour** and on-purpose for offline payment methods (`checkmo`, `banktransfer`, `purchaseorder`).
 
 When set:
 
 - Unmapped methods route to this default account. Useful if you trust a single "catch-all" bank account to capture every online-card payment that didn't map specifically.
+
+The chassis additionally validates that the chosen account's `Type=BANK` — Xero's `/Payments` rejects writes against `REVENUE` / `CURRENT` / etc. accounts with `BANKACCOUNT_NOT_VALID_FOR_PAYMENT` (see [XERO_API_QUIRKS §8](https://github.com/byte8io/byte8.io/blob/main/apps/ledger/__docs/XERO_API_QUIRKS.md#section-8)). The form-time validator surfaces misconfiguration before the invoice round-trips.
 
 ## Reference cache freshness
 
@@ -66,10 +59,10 @@ The reference cache rebuilds:
 
 - **At connect time** (post-OAuth handshake), once.
 - **Auto on settings page load** if older than 24 hours — the dashboard fires `refreshReferenceData(bindingId)` once-per-mount with a useRef guard. You'll see "Refreshing reference data from Xero…" briefly in the actions bar.
-- **Manually** via the **Refresh** button beside the freshness timestamp on the settings page. Use this when you've added a new Xero income category or bank account in Xero and want it to appear in the dropdown immediately.
+- **Manually** via the **Refresh** button beside the freshness timestamp on the settings page. Use this when you've added a new Xero account or tax rate and want it to appear in the dropdown immediately.
 
 Freshness is shown as `Updated 14 minutes ago` (with absolute timestamp on hover). If something looks stale or missing, click Refresh.
 
 ## What if a default override is no longer valid?
 
-If you delete a Xero income category or bank account that the binding's policy still references (e.g. you mapped `default_xero_income_category_url = "…/categories/old"` and then deleted that category in Xero), the dropdown shows it as `(missing) old-uuid` in red. Pick a replacement before saving — the validator blocks save with a `not_in_reference` field error otherwise.
+If you delete a Xero account or tax rate that the binding's policy still references (e.g. you mapped `default_xero_revenue_account_code = "999"` and then deleted account 999 in Xero), the validator blocks save with a `not_in_reference` field error. Pick a replacement before saving.

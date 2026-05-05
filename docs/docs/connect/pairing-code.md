@@ -100,7 +100,7 @@ Each Magento install (dev, staging, production) needs its own pairing. They're i
 
 - Same chassis tenant can have multiple Magento bindings (one per environment).
 - Each binding has its own `api_key`, its own outbox provider segment, its own sync state.
-- Settings (sync policy, income category routing, payment terms) are per-binding, configured separately per environment.
+- Settings (sync policy, revenue-account routing, tax-type defaults, payment terms) are per-binding, configured separately per environment.
 
 Standard practice: pair production first; spin up a separate chassis tenant for staging if you want isolated test data. The 14-day trial covers either path.
 

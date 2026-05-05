@@ -40,21 +40,21 @@ Submit. Ledger calls back into your Magento at `POST /V1/byte8/xero/setup/pair`,
 
 Still on `ledger.byte8.io`, navigate to **Connect → Xero** and complete the standard Xero OAuth handshake. The chassis stores the OAuth tokens encrypted at rest and refreshes them automatically — you never see them again.
 
-After connecting, the chassis builds a **reference cache** for your Xero account: income categories, bank accounts, payment-method targets. This takes ~3-5 seconds and runs once per binding; the dashboard's settings dropdowns populate from it.
+After connecting, the chassis builds a **reference cache** for your Xero organisation: tax rates, accounts (revenue + bank), branding themes. This takes a few seconds and runs once per binding; the dashboard's settings dropdowns populate from it.
 
 ## 5. Verify with a test invoice
 
 Raise a test invoice in your Magento admin (Sales → Orders → Invoice). Within ~60 seconds (the cron drain interval), it should appear:
 
 - **In your Magento admin** — Sales → Invoices grid, with the **Xero Status** chip flipping from `⏳ Pending` to `✓ Synced`.
-- **In Xero** — listed as an Open invoice on the contact created from the Magento customer.
-- **On the Byte8 dashboard** — `ledger.byte8.io/dashboard/sync` shows a `succeeded` row with the Xero invoice URL (`https://api.xero.com/v2/invoices/<uuid>`).
+- **In Xero** — listed under Awaiting Payment (or Drafts, depending on `xero_invoice_status_default`) on the contact created from the Magento customer.
+- **On the Byte8 dashboard** — `ledger.byte8.io/dashboard/sync` shows a `succeeded` row with the Xero `InvoiceID` (the UUID Xero returned).
 
 ## What's next
 
 If the test invoice synced cleanly, you're live. From here:
 
-- [Tour the sync settings](/docs/settings/sync-behavior) — sync filters, default mappings, payment-method routing, item-type map, commercial knobs. All optional; defaults are sensible.
+- [Tour the sync settings](/docs/settings/sync-behavior) — sync filters, default mappings, payment-method routing, commercial knobs. All optional; defaults are sensible.
 - [Browse the Magento admin surfaces](/docs/magento-admin/xero-status-grid) — chips, info blocks, dead-letter banner, every visual confirmation you'll see day-to-day.
 - [Read what syncs](/docs/what-syncs) — the entity-by-entity matrix.
 - If something didn't sync, head to [Troubleshooting](/docs/troubleshooting).

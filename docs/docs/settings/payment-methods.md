@@ -1,40 +1,44 @@
 ---
 sidebar_position: 3
 title: Payment-method map
-description: Magento payment-method code → Xero bank account routing. The map that decides which Xero bank account each payment lands in (or whether the invoice is left Open for manual reconciliation).
+description: Magento payment-method code → Xero bank account routing. The map that decides which Xero bank account each payment lands in (or whether the invoice is left AUTHORISED for manual reconciliation).
 ---
 
 # Payment-method map
 
-`ledger.byte8.io/dashboard/bindings/{id}/settings` → **Payment Method Map** card.
+`ledger.byte8.io/dashboard/bindings/{id}/settings` → **Payment method routing** card.
 
-When `invoice.paid` fires from Magento, the chassis decides which Xero `bank_account` the auto-payment lands in. The decision tree, in order:
+When `invoice.paid` fires from Magento, the chassis decides which Xero bank account the auto-payment lands in. The decision tree, in order:
 
 1. **Mapped explicitly** — payment_method appears in the map → route to mapped bank account
-2. **Mapped to `None`** — explicit "don't auto-pay" → invoice stays Open in Xero (B2B / net-terms semantics)
+2. **Mapped to "Don't auto-pay"** — explicit `null` → invoice stays AUTHORISED in Xero (B2B / net-terms semantics)
 3. **Unmapped, with `default_bank_account_id` set** — fallback to the default
-4. **Unmapped, no default** — invoice stays Open in Xero (same as case 2)
+4. **Unmapped, no default** — invoice stays AUTHORISED in Xero (same as case 2)
 
 Cases 2 + 4 are the **B2B-friendly default** — for offline payment methods (cheque, bank transfer, purchase order), Magento marks the invoice paid when the merchant clicks "Generate Invoice" but the money hasn't actually landed. The accountant reconciles in Xero when the cheque clears.
 
 ## How payments land in Xero
 
-Unlike Sage's separate `contact_payment` + `contact_allocation` flow, Xero attaches payment evidence directly to the invoice via:
+Unlike Sage's two-step `contact_payment` + `contact_allocation` flow, Xero handles AR allocation as part of the same write — a single round-trip:
 
 ```
-POST /v2/bank_transactions/<bank-account-uuid>/explanations
+POST /api.xro/2.0/Payments
 {
-  "explanation": {
-    "dated_on":  "2026-04-29",
-    "gross_value": "100.00",
-    "type":      "Money In",
-    "category":  "<paid-invoice-url>",
-    ...
-  }
+  "Payments": [
+    {
+      "Invoice":   { "InvoiceID": "<xero-invoice-uuid>" },
+      "Account":   { "AccountID": "<xero-bank-account-uuid>" },
+      "Date":      "2026-04-29",
+      "Amount":    100.00,
+      "Reference": "100012345"
+    }
+  ]
 }
 ```
 
-The `category` field carries the Xero invoice URL, which is how Xero links the explanation back to the source invoice. The chassis looks up that URL in `entity_xref` from the matching `invoice.created` event.
+Xero links the payment to the invoice automatically and flips the invoice's status to PAID. The chassis stores the returned `PaymentID` in `entity_xref` under `entity_type='invoice_payment'` so replays collapse to the same Xero row.
+
+`Reference` carries the Magento invoice increment_id — accountants reconciling the bank-feed import in Xero can search by this to find the source invoice.
 
 ## The dropdown
 
@@ -49,18 +53,20 @@ The Payment Method Map card lists every Magento payment method **active on your 
 - `paypal_express` (PayPal Express — if installed)
 - ... etc
 
-For each method, pick a Xero bank account from the second dropdown — or **None** to explicitly leave invoices Open.
+For each method, pick a Xero bank account from the second dropdown — or toggle **Don't auto-pay** to explicitly leave invoices AUTHORISED.
+
+The bank-account dropdown is filtered to Xero accounts with `Type=BANK` only. Xero rejects `/Payments` writes against revenue / asset / current accounts with `BANKACCOUNT_NOT_VALID_FOR_PAYMENT` — the chassis surfaces that as a form-time validation error so misconfigurations don't dead-letter.
 
 ## When to leave a method unmapped
 
-The default behaviour for unmapped methods is to leave the invoice Open. This is **correct** for:
+The default behaviour for unmapped methods is to leave the invoice AUTHORISED. This is **correct** for:
 
 - `checkmo` — cheque hasn't cleared yet
 - `banktransfer` — money hasn't arrived in your account yet
 - `purchaseorder` — pure B2B net-terms; invoice may sit at 30 / 60 / 90 days
 - Any other "the merchant marks paid before the money lands" scenario
 
-For these methods, leaving them unmapped means your Xero AR aging report stays accurate — invoices show as Open until the accountant reconciles when the money lands.
+For these methods, leaving them unmapped means your Xero AR aging report stays accurate — invoices show as AUTHORISED until the accountant reconciles when the money lands.
 
 ## When to map a method
 
@@ -78,7 +84,7 @@ Allowed and common — multiple cards / wallets often deposit into one bank acco
 
 ## What if I add a new payment method to Magento later?
 
-The chassis re-fetches the live list every time you load the settings page. The new method appears in the autocomplete on next visit. Until you map it (or set a `default_bank_account_id`), payments via that method leave invoices Open — same behaviour as unmapped.
+The chassis re-fetches the live list every time you load the settings page. The new method appears in the autocomplete on next visit. Until you map it (or set a `default_bank_account_id`), payments via that method leave invoices AUTHORISED — same behaviour as unmapped.
 
 ## Skipping payment events globally
 
@@ -91,13 +97,13 @@ Every `invoice.paid` Magento fires lands as `skipped_by_policy / payment_method_
 
 ## Cross-currency payments
 
-When the invoice is in a non-base currency (e.g. EUR invoice on a GBP-base Xero company), Xero's `bank_transaction_explanation` records the gross_value in the bank account's currency and references the invoice URL — Xero handles the FX translation server-side. The chassis just submits the actual settlement amount as Magento captured it; no separate config knob.
+When the invoice is in a non-base currency (e.g. EUR invoice on a GBP-base Xero org), Xero applies its own exchange rate from the org's FX setup at posting time. The chassis submits the actual settlement amount as Magento captured it; Xero handles FX translation server-side. Make sure the relevant currency is enabled in Xero's organisation settings (Settings → Currencies) — see [XERO_API_QUIRKS §5](https://github.com/byte8io/byte8.io/blob/main/apps/ledger/__docs/XERO_API_QUIRKS.md#section-5).
 
 ## Validation
 
 Field-level validation on save:
 
 - **Magento payment-method code** — must be in the live list. Typos surface as `not_in_reference` field errors.
-- **Xero bank account id** — must be in the cached `bank_accounts` list. Same red-underline treatment.
+- **Xero bank account id** — must be a `Type=BANK` account in the cached `/Accounts` snapshot. Same red-underline treatment.
 
 Both blocks save with a clear inline error rather than letting a misconfiguration dead-letter at sync time.

@@ -15,27 +15,27 @@ The Magento module itself (`byte8/magento-xero-accounting` + `byte8/module-clien
 
 ### Which Xero regions are supported?
 
-Xero runs a single global API at `api.xero.com/v2`. Unlike Sage, there's no region picker — your Xero company carries its own location and tax setup, and the chassis routes everything through the one endpoint. UK, US, EU companies all work the same way at the connector level.
+Xero runs a single global API at `api.xero.com/api.xro/2.0/`. Unlike Sage, there's no region picker — your Xero organisation carries its own country / tax setup, and the chassis routes everything through the one endpoint. UK, US, EU, AU, NZ organisations all work the same way at the connector level.
 
-Sandbox lives at `api.sandbox.xero.com/v2` and uses separate OAuth client credentials — see [Xero OAuth → Sandbox vs production](/docs/connect/xero-oauth#sandbox-vs-production).
+For sandbox-style validation, Xero offers a built-in **Demo Company** mode inside every Xero account — uses the same `api.xero.com` endpoint and the same OAuth client credentials as production. See [Xero OAuth → Demo Company vs production organisation](/docs/connect/xero-oauth#demo-company-vs-production-organisation).
 
-### Magento storefront in one country, Xero company in another?
+### Magento storefront in one country, Xero organisation in another?
 
-Supported. Magento's per-store currency / tax setup drives what we send; Xero treats the invoice's stated currency + tax routing at face value. Cross-currency settlement (e.g. EUR invoice paid via a GBP bank account) is handled by Xero's own FX translation server-side — see [Payment-method map → Cross-currency payments](/docs/settings/payment-methods#cross-currency-payments).
+Supported. Magento's per-store currency / tax setup drives what we send; Xero applies the per-line `TaxType` we set against its org's tax-rate setup. Cross-currency settlement (e.g. EUR invoice paid via a GBP bank account) is handled by Xero's own FX translation server-side — see [Payment-method map → Cross-currency payments](/docs/settings/payment-methods#cross-currency-payments). Make sure the relevant currency is enabled in Xero (Settings → Currencies); Xero's Standard plan caps at 2 active currencies.
 
-### Multiple Xero companies?
+### Multiple Xero organisations?
 
-Each Magento binding maps to one Xero company. For multi-company setups, spin up multiple bindings on the chassis and either: (a) use `website_filter` / `store_filter` per binding to scope which Magento orders flow to which Xero company, or (b) pair separate Magento environments per binding. Per-plan limits on the number of bindings live on the [Plans & pricing page](https://byte8.io/products/xero-accounting#pricing).
+Each Magento binding maps to one Xero organisation. For multi-org setups, spin up multiple bindings on the chassis and either: (a) use `website_filter` / `store_filter` per binding to scope which Magento orders flow to which Xero organisation, or (b) pair separate Magento environments per binding. Per-plan limits on the number of bindings live on the [Plans & pricing page](https://byte8.io/products/xero-accounting#pricing).
 
-## Coexistence with Sage Accounting
+## Coexistence with Sage Accounting and FreeAgent
 
-### Can I run Xero + Sage on the same Magento install?
+### Can I run Xero alongside another Byte8 connector on the same Magento install?
 
-Yes. The two connectors share the `byte8/module-client` chassis (outbox, JWT auth, sync-state mirror) and add per-provider columns / aliases so they don't trample each other. You'll see two columns on Sales → Invoices ("Sage Status" + "Xero Status"), two info blocks on the detail page, and two pairing surfaces on the config page. Each is paired and disconnected independently — see [Pairing-code Connect flow → Pairing alongside Sage Accounting](/docs/connect/pairing-code#pairing-alongside-sage-accounting).
+Yes. The connectors share the `byte8/module-client` chassis (outbox, JWT auth, sync-state mirror) and add per-provider columns / aliases so they don't trample each other. You'll see one Status column per installed provider on Sales → Invoices, one info block per provider on the detail page, and one pairing surface per provider on the config page. Each is paired and disconnected independently — see [Pairing-code Connect flow → Pairing alongside Sage Accounting](/docs/connect/pairing-code#pairing-alongside-sage-accounting).
 
-### Same invoice, two providers?
+### Same invoice, multiple providers?
 
-Yes — the same Magento invoice can sync to **both** Sage and Xero simultaneously if you have both connectors paired. Each provider's outbox / sync-state / `entity_xref` lookup is keyed independently. Most merchants pick one (the system their accountant uses); a few want a "primary + audit copy" setup, which works fine.
+Yes — the same Magento invoice can sync to **all** installed providers simultaneously. Each provider's outbox / sync-state / `entity_xref` lookup is keyed independently. Most merchants pick one (the system their accountant uses); a few want a "primary + audit copy" setup, which works fine.
 
 ## Multi-store / multi-website
 
@@ -43,13 +43,13 @@ Yes — the same Magento invoice can sync to **both** Sage and Xero simultaneous
 
 No. One binding can sync any number of Magento websites into one Xero company. Use `website_filter` on the sync policy if you only want some websites flowing.
 
-### Per-website Xero companies?
+### Per-website Xero organisations?
 
-Each binding pairs to one Xero company; the merchant maps Magento `website_id`s to bindings via `website_filter`. Per-plan limits on the number of Xero companies are on the [Plans & pricing page](https://byte8.io/products/xero-accounting#pricing).
+Each binding pairs to one Xero organisation; the merchant maps Magento `website_id`s to bindings via `website_filter`. Per-plan limits on the number of Xero organisations are on the [Plans & pricing page](https://byte8.io/products/xero-accounting#pricing).
 
-### Can two bindings share the same Xero company?
+### Can two bindings share the same Xero organisation?
 
-Technically yes (the chassis doesn't prevent it), but it'll cause `entity_xref` conflicts on the same customer / product appearing on both bindings. Don't.
+Technically yes (the chassis doesn't prevent it), but it'll cause `entity_xref` conflicts on the same customer appearing on both bindings. Don't.
 
 ## Security
 
@@ -63,20 +63,20 @@ The chassis logs Magento entity ids, Xero entity URLs, sync status, and error me
 
 ### What's the inbound webapi attack surface on my Magento?
 
-The connector exposes 7 REST endpoints under `/V1/byte8/*`:
+The connector exposes a small set of REST endpoints under `/V1/byte8/*`:
 
-- `GET /V1/byte8/{ping,payment-methods,invoice/:id,customer/:id,creditmemo/:id,payment/:id,product/:id}`
+- `GET /V1/byte8/{ping,payment-methods,invoice/:id,customer/:id,creditmemo/:id,payment/:id}`
 - `POST /V1/byte8/sync-state`
 
-All 7 are JWT-authed via `JwtUserContext` against the per-tenant `api_key`. The synthetic ACL plugin grants the JWT-authed integration user access to `Byte8_Client::byte8_webapi` only — no scope to cart, customer-create, admin, or any core Magento resource.
+All are JWT-authed via `JwtUserContext` against the per-tenant `api_key`. The synthetic ACL plugin grants the JWT-authed integration user access to `Byte8_Client::byte8_webapi` only — no scope to cart, customer-create, admin, or any core Magento resource.
 
-The pairing-code endpoint (`POST /V1/byte8/xero/setup/pair`) is the **only** unauthenticated webapi route, and it accepts requests only when a fresh-within-30-min pairing-code hash matches.
+The pairing-code endpoint (`POST /V1/byte8/xero_accounting/setup/pair`) is the **only** unauthenticated webapi route, and it accepts requests only when a fresh-within-30-min pairing-code hash matches.
 
 ### What if I want to revoke chassis access immediately?
 
 Disconnect from `ledger.byte8.io/dashboard/bindings/{id}` → Disconnect binding. Within seconds the chassis flips the binding to `revoked`, stops dispatching jobs, and revokes Xero tokens at Xero. The Magento side will start dead-lettering subsequent observer-fired events; the dead-letter banner surfaces the count.
 
-For nuclear-option: revoke the connection from Xero's Settings → Connected apps page, then disconnect the binding on the chassis dashboard. The chassis's signed JWTs against Xero will 401; the binding effectively goes dark immediately.
+For nuclear-option: revoke the connection from Xero's My Apps page (Settings → Connected apps in the org switcher), then disconnect the binding on the chassis dashboard. The chassis's bearer tokens against Xero will 401; the binding effectively goes dark immediately.
 
 ## Data
 
@@ -106,7 +106,7 @@ It's Enterprise on request — not a v1 feature. Doing it well needs Xero webhoo
 
 ### Why no `payment.captured` for offline payments?
 
-Magento doesn't have an API to attach an offline payment (cheque clearing, bank transfer landing) to an existing invoice after the fact. So our chassis can't reliably link the Xero payment to the right Xero invoice. Best practice: leave invoices Open in Xero, accountant manually reconciles via Xero's bank-feed import when the money lands. Aligns with how every Xero user already handles AR.
+Magento doesn't have an API to attach an offline payment (cheque clearing, bank transfer landing) to an existing invoice after the fact. So our chassis can't reliably link the Xero payment to the right Xero invoice. Best practice: leave invoices AUTHORISED in Xero, accountant manually reconciles via Xero's bank-feed import when the money lands. Aligns with how every Xero user already handles AR.
 
 ### Estimates and quotes?
 

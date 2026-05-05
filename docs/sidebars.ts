@@ -29,7 +29,6 @@ const sidebars: SidebarsConfig = {
         'settings/sync-behavior',
         'settings/default-mappings',
         'settings/payment-methods',
-        'settings/item-type-map',
         'settings/commercial',
       ],
     },

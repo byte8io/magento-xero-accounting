@@ -21,7 +21,7 @@ What happens:
 **What stays:**
 - `byte8_event_outbox` rows (with `provider = 'xero'`) — preserved as historical audit. The drain cron will skip them (they fail the chassis JWT verify since the api_key is gone).
 - `byte8_entity_sync_state` rows for Xero — preserved so the admin grids can still show historical Xero Status chips on past invoices.
-- The `entity_xref` table on the chassis (Xero invoice URL ↔ Magento entity mapping) — preserved so reconnecting later picks up the existing mapping rather than creating duplicate Xero entities.
+- The `entity_xref` table on the chassis (Xero entity UUIDs ↔ Magento entity mapping) — preserved so reconnecting later picks up the existing mapping rather than creating duplicate Xero entities.
 
 **What goes:**
 - The Magento Xero `api_key` (cleared from config_data).
@@ -36,7 +36,7 @@ The disconnect is **best-effort** on the chassis side — even if the chassis is
 The dashboard shows a confirmation dialog with a **What gets removed** / **What stays** breakdown so the operator knows exactly what they're committing to. On confirm:
 
 1. Chassis flips the binding to `revoked`.
-2. Xero OAuth tokens are revoked at Xero (best-effort `POST /v2/oauth/revoke` against `api.xero.com`).
+2. Xero OAuth tokens are revoked at Xero (best-effort `POST /connections/{tenantId}` DELETE against `api.xero.com/connections`, removing the chassis from the org's Connected apps list).
 3. The binding's `oauth_tokens` row is deleted from the chassis database.
 4. Worker stops dispatching this binding's sync jobs.
 
@@ -48,7 +48,7 @@ The Magento side won't immediately notice — observers will keep enqueueing out
 
 Reconnecting is identical to first connect — generate a new pairing code, paste into `ledger.byte8.io`, re-OAuth Xero. Because `entity_xref` is preserved, your existing Magento invoices that previously synced to Xero are recognised — no duplicate Xero entities created.
 
-If you reconnect to a **different Xero company**, the `entity_xref` mappings won't apply (those URLs only exist in the original company). New syncs create new Xero entities; the dashboard sync history still shows the old runs against the old binding.
+If you reconnect to a **different Xero organisation**, the `entity_xref` mappings won't apply (those UUIDs only exist in the original organisation). New syncs create new Xero entities; the dashboard sync history still shows the old runs against the old binding.
 
 ## Uninstalling the module
 

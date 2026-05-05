@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-description: Operator-facing diagnoses for the most common sync failures — Xero 422s, dead-letter rows, the catalogued Xero v2 quirks, cron, auth drift, missing chips.
+description: Operator-facing diagnoses for the most common sync failures — Xero validation errors, dead-letter rows, the catalogued Xero quirks, cron, auth drift, missing chips.
 ---
 
 # Troubleshooting
@@ -36,7 +36,7 @@ bin/magento byte8:client:outbox:inspect --provider=xero
 Read the `last_error` column for the cause. Common categories:
 
 - `HTTP 401 Unauthorized` → auth drift. Re-pair (see below).
-- `HTTP 422 Validation failed: …` → Xero rejected the payload. Read on for the catalogued quirks.
+- `HTTP 400 Validation` → Xero rejected the payload. Read the `errors[]` array in the response — Xero gives you the offending field path. Read on for the catalogued quirks.
 - `HTTP 5xx` → chassis-side or Xero-side outage. Wait + re-queue.
 
 **Fix:** see [Dead-letter banner](/docs/magento-admin/dead-letter-banner) for the full triage flow.
@@ -76,25 +76,41 @@ WHERE i.entity_id IN (<comma-list-of-already-synced-ids>);
 
 **Fix (option 3, future):** wait for the planned `byte8:client:sync-state:backfill` chassis CLI that walks `sync_runs WHERE status='succeeded' AND provider='xero'` and enqueues a PushSyncState per row. Slated for v1.1.
 
-## Xero v2 catalogued quirks
+## Xero catalogued quirks
 
-We've found and worked around **two** non-obvious Xero v2 behaviours so far. Each is invisible to merchants (the chassis handles it) but worth knowing for log-reading. The full list lives in `apps/ledger/__docs/XERO_API_QUIRKS.md`; we add an entry every time the worker logs a 4xx that isn't an obvious operator typo.
+We've found and worked around eight non-obvious Xero behaviours so far. Each is invisible to merchants (the chassis handles it) but worth knowing for log-reading. The full list lives in `apps/ledger/__docs/XERO_API_QUIRKS.md`; we add an entry every time the worker logs a 4xx that isn't an obvious operator typo.
 
-### §1 — `payment_terms_in_days` required on every POST
+### §1 — `Phones[]` array auto-inflated to all four type slots on responses
 
-Xero's `POST /v2/invoices` returns `422 Validation failed: payment_terms_in_days is not a number` if the field is missing — even on net-cash invoices, even on £0 lines. The chassis always sends `Some(default_xero_payment_terms_days || 30)` regardless of the merchant's input.
+Cosmetic. Xero's `GET /Contacts/{id}` returns a fixed-size 4-element `Phones[]` array (DEFAULT, MOBILE, FAX, DDI), filling unused slots with empty strings. Writes can send only the slots you care about. The chassis ignores empty slots when reading.
 
-This was non-obvious because `#[serde(skip_serializing_if = "Option::is_none")]` on the optional field caused the chassis to omit it for net-cash flows; Xero rejected. Fixed by always passing a value through; the field is documented as required by Xero's spec but easy to miss.
+### §3 — Shipping-line `TaxType` derived from canonical, not from the merchant's default
 
-### §2 — Numeric fields stringified on responses (POST + GET)
+Xero ignores the invoice-level "shipping tax rate" hint Sage exposes — the per-line `TaxType` controls everything. The chassis derives the shipping line's TaxType from `shipping_tax_amount / shipping_amount` (zero-rate → `NONE`, 20% → the merchant's default rate).
 
-Xero's API stringifies several numeric fields on responses (`exchange_rate: "1.0"`, `total_value: "100.00"`, etc.) but accepts them as numeric on input. Trying to decode a posted-and-returned invoice into a single struct fails with `invalid type: string "1.0", expected f64`.
+### §4 — Per-line `DiscountAmount` (NOT a synthetic discount line)
 
-The chassis works around it with **minimal-decode envelopes** for create-response decoding — types like `XeroInvoiceCreatedEnvelope` only read the `url` field, which is always a stable string identifier. The full invoice can be re-fetched later with a more permissive decoder if needed.
+Xero's invoice model has a per-line `DiscountAmount` field that's subtracted BEFORE per-line tax. Magento's invoice-level `discount_amount` is spread proportionally across lines via the totals identity (`line_subtotal + line_tax - line_total`) and lands as `DiscountAmount` per-line. The previous synthetic-discount-line approach (used by FreeAgent) under-taxed Xero invoices.
 
-If you ever see a `serde` decode error in the chassis logs after a POST, the fix is usually to add another stringified field to the workaround list (or to introduce a new minimal-decode envelope for that endpoint).
+### §5 — `Organisation is not subscribed to currency`
 
-## Live API probing for hard 422s
+Org-level setting, not an API auth issue. Operators must enable the relevant currency in Xero org settings (Settings → Currencies). Xero's Standard plan caps at 2 active currencies; Premium plans have higher caps.
+
+### §6 — `entity_xref` reverse-key constraint
+
+Internal — Postgres write path. The `entity_xref` table has TWO unique constraints (natural key + reverse key). When Xero deduplicates server-side on `ContactNumber` (see §7 below), the reverse-key fires if the same ContactID gets linked to two different Magento ids. Surfaced as `entity_xref_reverse_collision` error code; the dashboard provides a SQL recipe for the operator reconcile.
+
+### §7 — ONE Contact per Magento customer, NOT one per currency
+
+Xero is currency-flexible — a single Contact transacts in any currency the org has enabled (provided the Contact's `DefaultCurrency` is unset). The previous Sage-style per-currency contact xref keying caused reverse-key collisions; the chassis now keeps one Contact per Magento customer.
+
+### §8 — `/Payments` is a one-shot link (no allocation step) and only accepts `Type=BANK` accounts
+
+Unlike Sage's two-step `contact_payment + contact_allocation`, Xero's `POST /Payments` links one invoice to one bank account in a single round-trip. `/Payments` writes are rejected against revenue / asset / current accounts — only `Type=BANK` is accepted. The settings UI filters the bank-account dropdown accordingly.
+
+(See `XERO_API_QUIRKS.md` for §1–§8 in full, with reproduction steps + operator cleanup recipes.)
+
+## Live API probing for hard validation errors
 
 If a 4xx persists despite all the above, the fastest diagnostic is poking Xero's API directly with a known-good token:
 
@@ -104,28 +120,32 @@ cargo run -p ledger-cli -- oauth:status <binding-uuid> --reveal-token
 # (Dev-only; production tokens never get revealed)
 ```
 
-2. Curl Xero's v2 API with the token:
+2. Curl Xero's API with the token + `Xero-tenant-id`:
 ```bash
 TOKEN='...'
-curl -sS -H "Authorization: Bearer $TOKEN" \
-  "https://api.xero.com/v2/invoices?per_page=5" | jq
+TENANT='...'
+curl -sS \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Xero-tenant-id: $TENANT" \
+  -H "Accept: application/json" \
+  "https://api.xero.com/api.xro/2.0/Invoices?page=1" | jq
 ```
 
-3. Reconstruct the failing payload from the chassis worker logs (the WARN-level "Xero 4xx — full error envelope" line dumps the raw body), tweak fields one at a time until Xero accepts. The 422 response carries `errors` with `field` paths so you can pinpoint the offending key.
+3. Reconstruct the failing payload from the chassis worker logs (the WARN-level "Xero 4xx — full error envelope" line dumps the raw body), tweak fields one at a time until Xero accepts. The 400 response carries `Elements[].ValidationErrors[].Message` so you can pinpoint the offending key.
 
 This is what we use to find new Xero quirks. If you hit something not in the catalogue above, send the worker log line + the failing canonical to `helo@byte8.io` — we'll add the workaround.
 
-## Duplicate contact 422
+## Duplicate contact (server-side dedup)
 
-**Symptom:** `customer.upserted` 422s with "email has already been taken" or similar.
+**Symptom:** `customer.upserted` returns the existing ContactID rather than creating a new row.
 
-**Cause:** Xero rejects POST `/v2/contacts` when an existing contact has the same email — a "soft duplicate" rather than a real validation failure.
+**Cause:** Xero deduplicates Contacts server-side on `ContactNumber`. The chassis writes `ContactNumber=<magento_customer_id>`, so the same Magento customer always lands on the same Xero Contact even across replays.
 
-**Fix (live in the chassis):** the Xero provider catches the 422, GETs `/v2/contacts?email=…` to find the existing contact, stores the URL in `entity_xref`, and the worker mark_succeeds the run as if the POST had returned the existing contact directly. This is invisible to operators — but if you see it in the dead-letter pile, the chassis has a real bug; please email.
+**Behaviour:** this is correct and intentional. Xero responding with the existing ContactID is a feature, not a failure — the chassis's `entity_xref` write captures whichever ContactID Xero returned. If you see a `entity_xref_reverse_collision` error, that's the §6 / §7 case: an old per-currency keyed xref colliding with the unified Contact. The dashboard surfaces a SQL recipe to reconcile.
 
 ## When to email support vs DIY
 
 - **DIY:** dead-letter rows for catalogued causes (ref-cache stale, payment method unmapped, sync filter excluded) → re-queue after fixing.
-- **Email Byte8 support (`helo@byte8.io`):** novel 422s not in the catalogue, billing / subscription questions, anything where the chassis state seems out of sync with what you see in Magento or Xero.
+- **Email Byte8 support (`helo@byte8.io`):** novel 4xx errors not in the catalogue, billing / subscription questions, anything where the chassis state seems out of sync with what you see in Magento or Xero.
 
 Include in the email: tenant id (visible on the chassis dashboard), the Magento `entity_id` of the affected invoice, and the worker log line if you have it.

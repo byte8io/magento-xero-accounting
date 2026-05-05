@@ -65,17 +65,17 @@ The thin module's `InvoiceRepository::get()` returns the canonical Magento invoi
 
 The provider:
 
-1. Resolves or creates the Xero `contact` for this customer (looked up by email on duplicate POST 422).
-2. Translates the canonical invoice into Xero's `invoice` shape — handling per-line discounts, the Xero income category URL routing, and the always-present `payment_terms_in_days` field (Xero quirk #1 — required even on net-cash invoices).
-3. POSTs `/v2/invoices`. The response body wraps the created entity in `{"invoice": {…}}` — the chassis decodes a minimal envelope (just `url`) to dodge Xero quirk #2 (numeric fields stringified on responses), then stores `(magento_entity_id ↔ xero_invoice_url)` in `entity_xref`.
+1. Resolves or creates the Xero `Contact` for this customer (one Contact per Magento customer, currency-flexible — see [XERO_API_QUIRKS §7](https://github.com/byte8io/byte8.io/blob/main/apps/ledger/__docs/XERO_API_QUIRKS.md#section-7)). `ContactNumber=<magento_customer_id>` lets Xero dedupe on subsequent syncs.
+2. Translates the canonical invoice into Xero's `Invoice` shape — handling per-line `DiscountAmount`, `LineItem.AccountCode` from `default_xero_revenue_account_code`, `LineItem.TaxType` from `default_xero_tax_type`, the dedicated shipping line with derived TaxType, and `DueDate = Date + default_xero_payment_terms_days`.
+3. POSTs `/api.xro/2.0/Invoices` with body `{"Invoices": [<invoice>]}` and `Idempotency-Key: invoice:<magento_id>`. Xero responds with the created `InvoiceID`; the chassis stores `(magento_entity_id ↔ InvoiceID)` in `entity_xref` under `entity_type='invoice'`.
 
-On success, the worker calls `SyncRun::mark_succeeded(sync_run_id, xero_invoice_url)`. Then a follow-up `JobKind::PushSyncState` is enqueued — same chassis, different job kind — that POSTs the terminal status back to your Magento at `/rest/V1/byte8/sync-state` with `provider = 'xero'`. Your `byte8_entity_sync_state` row flips from `pending` to `synced`.
+On success, the worker calls `SyncRun::mark_succeeded(sync_run_id, xero_invoice_id)`. Then a follow-up `JobKind::PushSyncState` is enqueued — same chassis, different job kind — that POSTs the terminal status back to your Magento at `/rest/V1/byte8/sync-state` with `provider = 'xero'`. Your `byte8_entity_sync_state` row flips from `pending` to `synced`.
 
 ## Step 6 — Verify
 
 Refresh **Sales → Invoices** in your Magento admin. The chip is now `✓ Synced` (blue). Hover for the Xero invoice URL; click into the invoice for the **Xero Accounting** info block with the timestamp.
 
-Cross-check on the Byte8 dashboard at `ledger.byte8.io/dashboard/sync` — the run row shows `succeeded` with the resolved Xero invoice URL.
+Cross-check on the Byte8 dashboard at `ledger.byte8.io/dashboard/sync` — the run row shows `succeeded` with the resolved Xero `InvoiceID`.
 
 ## Total elapsed time
 

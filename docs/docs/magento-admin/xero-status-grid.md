@@ -27,7 +27,7 @@ The chip tells you, at a glance, whether each row reached Xero — without leavi
 
 If you also have `byte8/magento-sage-accounting` installed, both connectors live side-by-side on the grids — **two columns**: "Sage Status" and "Xero Status". Each chip reflects sync state for its own provider.
 
-Behind the scenes the Xero grid LEFT JOINs `byte8_entity_sync_state` with the table alias `byte8_sync_fa` and column suffix `_xero` to keep the two providers' UI columns from colliding. You don't need to know about that — but it's why column names like `byte8_sync_status_xero` show up if you inspect the grid XML.
+Behind the scenes the Xero grid LEFT JOINs `byte8_entity_sync_state` with a per-provider table alias and column suffix `_xero` to keep each provider's UI column from colliding with the others. You don't need to know about that — but it's why column names like `byte8_sync_status_xero` show up if you inspect the grid XML.
 
 ## Sorting + filtering
 
@@ -46,7 +46,7 @@ When the chassis terminal callback lands (typically 5-60 s later), the same row 
 
 The chip's `title` attribute carries useful context per row:
 
-- **Synced** → Xero invoice URL (`https://api.xero.com/v2/invoices/<uuid>` — opaque to humans but useful in support tickets)
+- **Synced** → Xero `InvoiceID` UUID (opaque to humans but useful in support tickets — pasted into Xero's URL search lands on the invoice)
 - **Skipped** → skip-reason code (`payment_method_not_mapped`, `outside_sync_since`, etc — see [Sync behaviour](/docs/settings/sync-behavior) for the full list)
 - **Failed** → error-code class (one of: `auth`, `not_found`, `validation`, `rate_limited`, `provider`, `http`, `database`, `serde`, `internal`)
 
@@ -68,4 +68,4 @@ This may change in v1.1 if a design partner asks for an Orders-grid roll-up — 
 
 ## No chip on Customers grid
 
-Same reasoning. One Magento customer maps to one Xero contact, which is simpler than the Sage per-currency model — but a row-level chip would still need to surface "did this customer's contact upsert succeed" without the row-level signal of a specific event. Customer detail-page block with the chassis-resolved Xero contact URL is the planned v1.1+ surface.
+Same reasoning. One Magento customer maps to one Xero Contact (Xero is currency-flexible), which is simpler than Sage's per-currency model — but a row-level chip would still need to surface "did this customer's contact upsert succeed" without the row-level signal of a specific event. Customer detail-page block with the chassis-resolved Xero `ContactID` is the planned v1.1+ surface.

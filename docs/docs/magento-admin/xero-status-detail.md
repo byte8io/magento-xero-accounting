@@ -11,8 +11,8 @@ Every **Invoice** and **Credit Memo** detail page gets a "Xero Accounting" info 
 What it shows:
 
 - **Status** — the same chip as the grid column (Synced / Pending / Skipped / Failed / —)
-- **Xero Reference** — the human-readable identifier (e.g. `inv-001` for invoices, `cn-005` for credit notes). v1.1+ — currently the chassis sends `null` here; the column will populate once the provider trait surfaces Xero's `reference` field from the create response.
-- **Xero Entity URL** — the canonical `api.xero.com/v2/invoices/<uuid>` URL. Useful for support tickets ("what's the Xero URL of this thing?").
+- **Xero Reference** — the human-readable identifier (`InvoiceNumber` for invoices, `CreditNoteNumber` for credit notes — usually the Magento increment_id, prefixed if you set `invoice_number_prefix`).
+- **Xero Entity ID** — the `InvoiceID` / `CreditNoteID` / `PaymentID` UUID returned by Xero. Useful for support tickets ("what's the Xero id of this thing?").
 - **Skip Reason** (when status = Skipped) — the stable code from `sync_policy::reasons::*`, e.g. `payment_method_not_mapped`.
 - **Error Code** (when status = Failed) — the chassis classifier output (`provider`, `auth`, `validation`, etc.).
 - **Last Sync** — the timestamp of the most recent terminal write to this row, in UTC.
@@ -21,7 +21,7 @@ What it shows:
 
 The block lives in the `order_additional_info` reference container — Magento's standard slot for "extra metadata" on order / invoice / credit-memo views. Sits below "Invoice Information" by default; theme overrides may reposition it.
 
-If you also have Sage Accounting installed, both info blocks render side-by-side — one per provider — so the operator can see both ledgers' state in one glance.
+If you also have Sage Accounting or FreeAgent Accounting installed, all installed providers' info blocks render stacked — one per provider — so the operator can see every ledger's state in one glance.
 
 ## When does it render?
 
@@ -41,7 +41,7 @@ This may change in v1.1 if a design partner asks for an Order-level rollup info 
 
 ## Why no block on the Customer detail page
 
-Per-customer Xero contact resolution lives on the chassis side via `entity_xref` — adding a Magento-side block requires the chassis to publish the `xero_contact_url` per customer back as a sync-state mirror row, which we don't do today. Customer-block surfacing is planned v1.1+; let us know if it's blocking.
+Per-customer Xero contact resolution lives on the chassis side via `entity_xref` — adding a Magento-side block requires the chassis to publish the `ContactID` per customer back as a sync-state mirror row, which we don't do today. Customer-block surfacing is planned v1.1+; let us know if it's blocking.
 
 ## Manual refresh
 

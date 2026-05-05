@@ -55,9 +55,9 @@ composer require byte8/magento-xero-accounting
 
 The registry URL is in the welcome email Byte8 sends after you sign up for the trial. After public launch, the package will be available on Packagist directly without registry config.
 
-## Coexistence with Sage Accounting
+## Coexistence with Sage Accounting and FreeAgent
 
-If you already run `byte8/magento-sage-accounting` on this install, **both connectors coexist on the same Magento** — they share the `byte8/module-client` chassis. The outbox grows a `provider` column (default `sage_accounting`) and routes events per provider; grid join aliases are suffixed (`byte8_sync_status_xero` vs the Sage column) so the two Xero + Sage Status chips can sit side-by-side on Sales → Invoices.
+If you already run `byte8/magento-sage-accounting` or `byte8/magento-freeagent-accounting` on this install, **all connectors coexist on the same Magento** — they share the `byte8/module-client` chassis. The outbox carries a `provider` column and routes events per provider; grid join aliases are suffixed per provider (`byte8_sync_status_xero` / `byte8_sync_status_freeagent` / etc.) so each provider's Status chip sits in its own column on Sales → Invoices.
 
 You'll pair each connector independently — see [Pairing-code Connect flow](/docs/connect/pairing-code).
 
@@ -79,7 +79,7 @@ In the admin: **Stores → Configuration → Byte8 → Xero Accounting** should 
 
 `bin/magento setup:upgrade` creates two tables (both owned by `byte8/module-client`):
 
-- `byte8_event_outbox` — transport queue for outbound events. Drained by the `byte8_outbox_drain` cron every minute. Carries a `provider` column so Sage + Xero events route correctly.
+- `byte8_event_outbox` — transport queue for outbound events. Drained by the `byte8_outbox_drain` cron every minute. Carries a `provider` column so events route correctly across coexisting connectors.
 - `byte8_entity_sync_state` — Magento-side mirror of ledger sync outcomes. Drives the Xero Status chips on the admin grids and detail pages.
 
 The connector itself adds Magento config rows under `byte8/xero_accounting/*` for the pairing flow but no new tables.
@@ -110,7 +110,7 @@ composer remove byte8/magento-xero-accounting
 bin/magento setup:upgrade
 ```
 
-This stops the Xero observers from firing and removes the module from the autoload. The `byte8_event_outbox` and `byte8_entity_sync_state` tables stay (audit data) and the shared `Byte8_Client` / `Byte8_Core` chassis stays enabled if Sage is still installed; drop them manually if you want a clean slate. Disconnect on the ledger side from **Stores → Configuration → Byte8 → Xero Accounting → Disconnect** *before* removing the module so the chassis flips its binding row to `revoked`.
+This stops the Xero observers from firing and removes the module from the autoload. The `byte8_event_outbox` and `byte8_entity_sync_state` tables stay (audit data) and the shared `Byte8_Client` / `Byte8_Core` chassis stays enabled if other Byte8 connectors (Sage / FreeAgent) are still installed; drop them manually if you want a clean slate. Disconnect on the ledger side from **Stores → Configuration → Byte8 → Xero Accounting → Disconnect** *before* removing the module so the chassis flips its binding row to `revoked`.
 
 ## Network requirements
 
